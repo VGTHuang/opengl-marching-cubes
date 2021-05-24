@@ -5,6 +5,8 @@ uniform ivec3 inImgShape; // x, y, z of original scanned Img
 uniform ivec3 outCubeShape; // x, y, z of output shape
 uniform float cubeRatio;     // the size of a cube / 1 unit length in img
 uniform float isoLevel; // the threshold
+uniform int batchThickness;
+uniform int batchCount;
 
 layout(std430, binding = 1) readonly buffer InImg {
 	float data[];
@@ -109,12 +111,13 @@ vec3 interpCubePositions(int index1, int index2) {
 }
 
 vec3 getNormal(vec3 position) {
-	float vx1 = getInterpImgData(vec3(position.x - 0.5, position.y, position.z));
-	float vx2 = getInterpImgData(vec3(position.x + 0.5, position.y, position.z));
-	float vy1 = getInterpImgData(vec3(position.x, position.y - 0.5, position.z));
-	float vy2 = getInterpImgData(vec3(position.x, position.y + 0.5, position.z));
-	float vz1 = getInterpImgData(vec3(position.x, position.y, position.z - 0.5));
-	float vz2 = getInterpImgData(vec3(position.x, position.y, position.z + 0.5));
+	float delta = 0.2;
+	float vx1 = getInterpImgData(vec3(position.x - delta, position.y, position.z));
+	float vx2 = getInterpImgData(vec3(position.x + delta, position.y, position.z));
+	float vy1 = getInterpImgData(vec3(position.x, position.y - delta, position.z));
+	float vy2 = getInterpImgData(vec3(position.x, position.y + delta, position.z));
+	float vz1 = getInterpImgData(vec3(position.x, position.y, position.z - delta));
+	float vz2 = getInterpImgData(vec3(position.x, position.y, position.z + delta));
 	return normalize(vec3(vx1 - vx2, vy1 - vy2, vz1-vz2));
 }
 
@@ -157,6 +160,7 @@ void main() {
 	for(int i = 0; i < 12; i++) {
 		triVerticeCandidates[i] = interpCubePositions(edgeToGridDict[i][0], edgeToGridDict[i][1]);
 		triNormalCandidates[i] = getNormal(triVerticeCandidates[i]);
+		triVerticeCandidates[i].x += batchThickness* batchCount / cubeRatio;
 	}
 
 	for (int i = 0; triTable.data[cubeindex*16 + i] != -1; i += 3)

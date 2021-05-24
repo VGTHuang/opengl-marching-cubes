@@ -52,7 +52,6 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, outNormalsSSBO);
 	normals = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4) * outTrianglesCount * 4, GL_MAP_READ_BIT);
 
-
 	// **************************************************************************************************
 
 	int positionSize = sizeof(float) * 4 * 3 * outTrianglesCount;
@@ -78,19 +77,87 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	hasInitializdMarchingCubes = true;
 }
 
-// https://www.cnblogs.com/ghjnwk/p/10558730.html
-void ReadSizeFile(const char *file_path, unsigned short size[4])
-{
-	FILE *file;
-	errno_t err = fopen_s(&file, file_path, "rt+");
-	if (err > 0) //条件不成立，则说明文件打开失败
-	{
-		fclose(file);
-		std::cout << "打开文件失败！ " << std::endl;
+
+
+
+void createMarchingCubes1(const int outputShape, const float isoLevel, const glm::ivec3 inShape, float *const image3D, unsigned int &VAO, unsigned int &VBO) {
+
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+	computeShader->use();
+
+	// release buffer if marching cubes have already been created once
+	glDeleteVertexArrays(1, &VAO);
+
+	int batchThickness = 50;
+
+	computeShader->setIVec3("inImgShape", batchThickness, inShape.y, inShape.z);
+
+	computeShader->setIVec3("outCubeShape", outputShape, outputShape, outputShape);
+	int inMaxDim = std::max({ inShape.x, inShape.y, inShape.z }); // in 3 dimensions of input image3D, which dimension has the largest index
+	computeShader->setFloat("cubeRatio", inMaxDim * 1.0f / outputShape);
+	computeShader->setFloat("isoLevel", isoLevel);
+	computeShader->setInt("batchThickness", batchThickness);
+
+
+	for (int batchCount = 0; batchCount < 10; batchCount += 1) {
+		// outPositions
+		createSSBO(outPositionsSSBO, inShape.y*inShape.z*batchThickness * 4, sizeof(glm::vec4), 2, outPositionsBuffer, computeShader, "OutPositions");
+		// outNormals
+		createSSBO(outNormalsSSBO, inShape.y*inShape.z*batchThickness * 4, sizeof(glm::vec4), 3, outNormalsBuffer, computeShader, "OutNormals");
+		// outTrianglesCount
+		createSSBO(outTrianglesCountSSBO, 1, sizeof(float), 4, &outTrianglesBuffer, computeShader, "OutTrianglesCount");
+
+		if (hasInitializdMarchingCubes == false) {
+			// inImg
+			createSSBO(inImgSSBO, inShape.y*inShape.z*batchThickness, sizeof(float), 1, image3D + (inShape.y * inShape.z) * batchCount * batchThickness, computeShader, "InImg");
+			// edgeTable
+			createSSBO(edgeTableSSBO, 256, sizeof(int), 6, &edgeTable[0], computeShader, "EdgeTable");
+			// triTable
+			createSSBO(triTableSSBO, 256 * 16, sizeof(int), 7, &triTable[0], computeShader, "triTable");
+		}
+
+		computeShader->use();
+		computeShader->setInt("batchCount", batchCount);
+		glDispatchCompute(outputShape / 4, outputShape / 4, outputShape / 4);
+		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+		// glUseProgram(0);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outTrianglesCountSSBO);
+		outTrianglesCount = ((glm::uint *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::uint), GL_MAP_READ_BIT))[0];
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outPositionsSSBO);
+		positions = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4) * outTrianglesCount * 4, GL_MAP_READ_BIT);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outNormalsSSBO);
+		normals = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4) * outTrianglesCount * 4, GL_MAP_READ_BIT);
 	}
-	fscanf_s(file, "Float16(%d, %d, %d, %d)", &size[0], &size[1], &size[2], &size[3]);
-	fclose(file);
+
+	
+
+	// **************************************************************************************************
+
+	int positionSize = sizeof(float) * 4 * 3 * outTrianglesCount;
+	int normalSize = sizeof(float) * 4 * 3 * outTrianglesCount;
+
+	glGenVertexArrays(1, &VAO);
+	glGenBuffers(1, &VBO);
+	glBindVertexArray(VAO);
+
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	glBufferData(GL_ARRAY_BUFFER, positionSize + normalSize, nullptr, GL_STATIC_DRAW);
+	glBufferSubData(GL_ARRAY_BUFFER, 0, positionSize, positions);
+	glBufferSubData(GL_ARRAY_BUFFER, positionSize, normalSize, normals);
+
+	// position attribute
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(0);
+	// normal attribute
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(positionSize));
+	glEnableVertexAttribArray(1);
+
+
+	hasInitializdMarchingCubes = true;
 }
+
+
+
 
 int main()
 {
@@ -160,17 +227,12 @@ int main()
 	// compute shader
 	computeShader = new Shader("ComputeShader.glsl");
 
-
-	const int dcmX = 200, dcmY = 300, dcmZ = 200;
-	float *image3D;
-	image3D = (float *)malloc(sizeof(float) * dcmX * dcmY * dcmZ);
-
-
 	// read medical data
 	std::string rawFilePath = "H:/hhx/hhx_works/scientific_visualization_2021/visualization-data/raw_data/cbct_sample_z=507_y=512_x=512.raw";
-	glm::vec3 imgShape(507, 512, 512);
+	glm::ivec3 imgShape(507, 512, 512);
 	FILE *fpsrc = NULL;
 	unsigned short *imgValsUINT = new unsigned short[507 * 512 * 512];
+	float *imgValsFLOAT = new float[507 * 512 * 512];
 	errno_t err = fopen_s(&fpsrc, rawFilePath.c_str(), "r");
 	if (err != 0)
 	{
@@ -192,28 +254,22 @@ int main()
 		}
 	}
 
-	for (int i = 0; i < dcmX; i++) {
-		for (int j = 0; j < dcmY; j++) {
-			for (int k = 0; k < dcmZ; k++) {
-				// image3D[i*512* 512 +j* 512 +k] = (float)imgValsUINT[512*512*(200+i)+512*(200+j)+k] / (float)maxImgValue;
-				image3D[i * dcmY * dcmZ + j * dcmZ + k] = (float)imgValsUINT[512 * 512 * i + 512 * j + k] / (float)maxImgValue;
-			}
-		}
+	for (int i = 0; i < 507 * 512 * 512; i++) {
+		imgValsFLOAT[i] = (float)imgValsUINT[i] / (float)maxImgValue;
 	}
 
 	delete[] imgValsUINT;
 
 
-
-	int outputShape = 128;
-	int oldOutputShape = 128;
+	int outputShape = 60;
+	int oldOutputShape = outputShape;
 
 	float isoLevel = 0.2;
-	float oldIsoLevel = 0.2;
+	float oldIsoLevel = isoLevel;
 
 	unsigned int VAO, VBO;
 
-	createMarchingCubes(outputShape, isoLevel, glm::ivec3(dcmX, dcmY, dcmZ), image3D, VAO, VBO);
+	createMarchingCubes1(outputShape, isoLevel, imgShape, imgValsFLOAT, VAO, VBO);
 	
 
 	// uniform buffer for draw & draw wireframe
@@ -279,7 +335,7 @@ int main()
 		ImGui::Render();
 
 		if (isoLevel != oldIsoLevel || outputShape != oldOutputShape) {
-			createMarchingCubes(outputShape, isoLevel, glm::ivec3(dcmX, dcmY, dcmZ), image3D, VAO, VBO);
+			createMarchingCubes1(outputShape, isoLevel, imgShape, imgValsFLOAT, VAO, VBO);
 			oldIsoLevel = isoLevel;
 			oldOutputShape = outputShape;
 		}
