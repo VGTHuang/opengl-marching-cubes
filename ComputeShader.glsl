@@ -111,7 +111,7 @@ vec3 interpCubePositions(int index1, int index2) {
 }
 
 vec3 getNormal(vec3 position) {
-	float delta = 0.2;
+	float delta = 0.6;
 	float vx1 = getInterpImgData(vec3(position.x - delta, position.y, position.z));
 	float vx2 = getInterpImgData(vec3(position.x + delta, position.y, position.z));
 	float vy1 = getInterpImgData(vec3(position.x, position.y - delta, position.z));
@@ -120,8 +120,6 @@ vec3 getNormal(vec3 position) {
 	float vz2 = getInterpImgData(vec3(position.x, position.y, position.z + delta));
 	return normalize(vec3(vx1 - vx2, vy1 - vy2, vz1-vz2));
 }
-
-
 
 void main() {
 	gridCoord[0] = vec3(gl_GlobalInvocationID.x,   gl_GlobalInvocationID.y,   gl_GlobalInvocationID.z  );
@@ -171,12 +169,6 @@ void main() {
 		uint triVertice2 = triTable.data[cubeindex*16 + i+1];
 		uint triVertice3 = triTable.data[cubeindex*16 + i+2];
 
-		/*
-		outPositions.data[index_offset * 3] = cubeRatio * vec4(triVerticeCandidates[triVertice1], 1.0);
-		outPositions.data[index_offset * 3+1] = cubeRatio * vec4(triVerticeCandidates[triVertice2], 1.0);
-		outPositions.data[index_offset * 3+2] = cubeRatio * vec4(triVerticeCandidates[triVertice3], 1.0);
-		*/
-
 		outPositions.data[index_offset * 3] = 10 * vec4(triVerticeCandidates[triVertice1], 1.0) / outCubeShape.x;
 		outPositions.data[index_offset * 3+1] = 10 * vec4(triVerticeCandidates[triVertice2], 1.0) / outCubeShape.x;
 		outPositions.data[index_offset * 3+2] = 10 * vec4(triVerticeCandidates[triVertice3], 1.0) / outCubeShape.x;
@@ -184,33 +176,5 @@ void main() {
 		outNormals.data[index_offset * 3] = vec4(triNormalCandidates[triVertice1], 1.0);
 		outNormals.data[index_offset * 3+1] = vec4(triNormalCandidates[triVertice2], 1.0);
 		outNormals.data[index_offset * 3+2] = vec4(triNormalCandidates[triVertice3], 1.0);
-
 	}
-
-
-
-	/*
-	float val = getInterpImgData(gridCoord[0]);
-	if (val > isoLevel && val < isoLevel+0.1) {
-		uint index_offset = atomicAdd(outTrianglesCount.data[0], 1);
-		
-		outPositions.data[index_offset * 3] = cubeRatio * vec4(gridCoord[0], 1.0);
-		outPositions.data[index_offset * 3+1] = cubeRatio * vec4(gridCoord[1], 1.0);
-		outPositions.data[index_offset * 3+2] = cubeRatio * vec4(gridCoord[4], 1.0);
-
-		outNormals.data[index_offset * 3] = vec4(getNormal(gridCoord[0]), 1.0);
-		outNormals.data[index_offset * 3+1] = vec4(getNormal(gridCoord[1]), 1.0);
-		outNormals.data[index_offset * 3+2] = vec4(getNormal(gridCoord[4]), 1.0);
-		
-		outPositions.data[index_offset * 3] = cubeRatio * vec4(triVerticeCandidates[0], 1.0);
-		outPositions.data[index_offset * 3+1] = cubeRatio * vec4(triVerticeCandidates[1], 1.0);
-		outPositions.data[index_offset * 3+2] = cubeRatio * vec4(triVerticeCandidates[6], 1.0);
-
-		outNormals.data[index_offset * 3] = vec4(triNormalCandidates[0], 1.0);
-		outNormals.data[index_offset * 3+1] = vec4(triNormalCandidates[1], 1.0);
-		outNormals.data[index_offset * 3+2] = vec4(triNormalCandidates[6], 1.0);
-	}
-	*/
-
-
 }

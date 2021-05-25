@@ -6,7 +6,7 @@ in vec4 vsOutPosition;
 
 uniform vec3 camPos;
 
-vec3 lightDir2 = vec3(0.0, 1.0, 0.0);
+vec3 lightDir2 = vec3(1.0, 1.0, 0.0);
 vec3 lightCol1 = vec3(2.0, 1.9, 1.7);
 vec3 lightCol2 = vec3(0.5, 0.6, 0.7);
 
@@ -39,7 +39,7 @@ void main()
 	vec3 camDir = normalize(camPos - vec3(vsOutPosition));
 
 	vec3 FragColorVec3 = calcLight(vsOutNormal, camDir, camDir, lightCol1) * getAttenuation(length(camPos - vec3(vsOutPosition)))
-		+ calcLight(vsOutNormal, camDir, lightDir2, lightCol2);
+		+ calcLight(vsOutNormal, camDir, normalize(lightDir2), lightCol2);
 
 	FragColor = vec4(FragColorVec3, 1.0);
 }
