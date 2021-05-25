@@ -2,12 +2,11 @@
 // SSBOs
 GLuint inImgSSBO, outPositionsSSBO, outNormalsSSBO, outTrianglesCountSSBO, edgeTableSSBO, triTableSSBO;
 
-// SSBOs can only read 128MB, so an input image is sliced into batches (eg. 507 * 512 * 512 -> batchSize * batchThickness * 512 * 512)
-const int batchSize = 10;
-const int batchThickness = 50;
+// SSBOs can only read 128MB, so an input image is sliced into batches (eg. 507 * 512 * 512 -> batchSize * batchMaxThickness * 512 * 512)
+const int batchMaxThickness = 50;
 
 // has to be there so as to clear SSBO buffers properly?
-float *outPositionsBuffers[batchSize] = { nullptr, nullptr }, *outNormalsBuffers[batchSize] = { nullptr, nullptr };
+float *outPositionsBuffers[100], *outNormalsBuffers[100];
 int outTrianglesBuffer;
 
 // count the total number of triangles from all batches
@@ -21,7 +20,54 @@ std::vector<float *> normalList = std::vector<float *>();
 // if true, we have properly set edgetable and tritable for compute shader; no need to pass them to it again
 bool hasInitializdMarchingCubes = false;
 
+struct OffsetParams {
+	int outputWidth;
+	int outputOffset;
+	float imgOffset;
+	int imgStart;
+	int imgWidth;
+};
+
+std::vector<OffsetParams> calcOffsets(int batchMaxThickness, float cubeRatio, int imgWidth, int outputWidth) {
+	std::vector<OffsetParams> v;
+	int outputMaxThickness = (int)((float)batchMaxThickness / cubeRatio);
+	int tempOutputStart = 0;
+	while (tempOutputStart < outputWidth - 1) {
+		int tempOutputEnd = tempOutputStart + outputMaxThickness;
+		float tempImgStartF = (tempOutputStart - 1) * cubeRatio;
+		int tempImgStartI = int(tempImgStartF);
+		float tempImgEndF = (tempOutputEnd + 1) * cubeRatio;
+		int tempImgEndI = int(tempImgEndF) + 2;
+		if (tempImgStartI < 0) {
+			tempImgStartI = 0;
+		}
+		if (tempImgEndI > imgWidth - 1) {
+			tempImgEndI = imgWidth - 1;
+		}
+		OffsetParams p;
+		p.imgStart = tempImgStartI;
+		p.imgWidth = tempImgEndI - tempImgStartI;
+		p.outputOffset = tempOutputStart;
+		// TODO -? +?
+		p.imgOffset = tempOutputStart * cubeRatio - (float)tempImgStartI;
+		p.outputWidth = outputMaxThickness;
+		if (tempImgEndI - tempImgStartI > 1) {
+			v.push_back(p);
+		}
+
+		tempOutputStart = tempOutputEnd;
+	}
+	return v;
+}
+
+
+
 void createMarchingCubes(const int outputShape, const float isoLevel, const glm::ivec3 inShape, float *const image3D, unsigned int &VAO, unsigned int &VBO) {
+
+	int inMaxDim = std::max({ inShape.x, inShape.y, inShape.z }); // in 3 dimensions of input image3D, which dimension has the largest index?
+	float cubeRatio = inMaxDim * 1.0f / outputShape;
+	std::vector<OffsetParams> offsets = calcOffsets(batchMaxThickness, cubeRatio, inShape.x, outputShape);
+
 	outTrianglesCount = 0;
 	for (float *tempPosition : positionList) {
 		free(tempPosition);
@@ -40,13 +86,9 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	glDeleteVertexArrays(1, &VAO);
 
 
-	computeShader->setIVec3("inImgShape", batchThickness, inShape.y, inShape.z);
-
-	computeShader->setIVec3("outCubeShape", outputShape, outputShape, outputShape);
-	int inMaxDim = std::max({ inShape.x, inShape.y, inShape.z }); // in 3 dimensions of input image3D, which dimension has the largest index
-	computeShader->setFloat("cubeRatio", inMaxDim * 1.0f / outputShape);
+	computeShader->setFloat("cubeRatio", cubeRatio);
+	computeShader->setFloat("sizeCompressRatio", 10.0 / outputShape);
 	computeShader->setFloat("isoLevel", isoLevel);
-	computeShader->setInt("batchThickness", batchThickness);
 
 	if (hasInitializdMarchingCubes == false) {
 		// edgeTable
@@ -57,21 +99,23 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 
 	float *positions, *normals;
 
-	for (int batchCount = 0; batchCount < batchSize; batchCount += 1) {
+	for (int batchCount = 0; batchCount < offsets.size(); batchCount += 1) {
 		// outPositions
-		createSSBO(outPositionsSSBO, inShape.y*inShape.z*batchThickness * 4, sizeof(glm::vec4), 2, outPositionsBuffers[batchCount], computeShader, "OutPositions");
+		createSSBO(outPositionsSSBO, inShape.y*inShape.z*batchMaxThickness * 4, sizeof(glm::vec4), 2, outPositionsBuffers[batchCount], computeShader, "OutPositions");
 		// outNormals
-		createSSBO(outNormalsSSBO, inShape.y*inShape.z*batchThickness * 4, sizeof(glm::vec4), 3, outNormalsBuffers[batchCount], computeShader, "OutNormals");
+		createSSBO(outNormalsSSBO, inShape.y*inShape.z*batchMaxThickness * 4, sizeof(glm::vec4), 3, outNormalsBuffers[batchCount], computeShader, "OutNormals");
 		// outTrianglesCount
 		createSSBO(outTrianglesCountSSBO, 1, sizeof(float), 4, &outTrianglesBuffer, computeShader, "OutTrianglesCount");
 		// inImg
-		createSSBO(inImgSSBO, inShape.y*inShape.z*batchThickness, sizeof(float), 1, image3D + (inShape.y * inShape.z) * batchCount * batchThickness, computeShader, "InImg");
+		computeShader->setIVec3("inImgShape", offsets[batchCount].imgWidth, inShape.y, inShape.z);
+		createSSBO(inImgSSBO, inShape.y*inShape.z*offsets[batchCount].imgWidth, sizeof(float), 1, image3D + (inShape.y * inShape.z) * offsets[batchCount].imgStart, computeShader, "InImg");
 
 
-		computeShader->use();
-		computeShader->setInt("batchCount", batchCount);
+		computeShader->setInt("outputOffset", offsets[batchCount].outputOffset);
+		computeShader->setFloat("imgOffset", offsets[batchCount].imgOffset);
+
 		// TODO how large?
-		glDispatchCompute(outputShape / 16, outputShape / 4, outputShape / 4);
+		glDispatchCompute(offsets[batchCount].outputWidth, outputShape / 4, outputShape / 4);
 		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 		// glUseProgram(0);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outTrianglesCountSSBO);
@@ -92,10 +136,7 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 		outTrianglesCount += tempOutTrianglesCount;
 	}
 
-	
-
-	// **************************************************************************************************
-
+	// total size of the buffer in bytes
 	int totalPositionSize = sizeof(float) * 4 * 3 * outTrianglesCount;
 	int totalNormalSize = sizeof(float) * 4 * 3 * outTrianglesCount;
 	glGenVertexArrays(1, &VAO);
@@ -104,19 +145,20 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
 	glBufferData(GL_ARRAY_BUFFER, totalPositionSize + totalNormalSize, nullptr, GL_STATIC_DRAW);
 
-	int allocatedSize = 0;
-
+	int bindedSize = 0;
+	// data in vbo follows the structure of
+	// [positions from 1st batch] [positions from 2nd batch] ... [normals from 1st batch] [normals from 2nd batch] ...
 	// buffer all positions
-	for (int batchCount = 0; batchCount < batchSize; batchCount += 1) {
+	for (int batchCount = 0; batchCount < offsets.size(); batchCount += 1) {
 		int tempSize = sizeof(float) * 4 * 3 * outTrianglesCountList[batchCount];
-		glBufferSubData(GL_ARRAY_BUFFER, allocatedSize, tempSize, positionList[batchCount]);
-		allocatedSize += tempSize;
+		glBufferSubData(GL_ARRAY_BUFFER, bindedSize, tempSize, positionList[batchCount]);
+		bindedSize += tempSize;
 	}
 	// buffer all normals
-	for (int batchCount = 0; batchCount < batchSize; batchCount += 1) {
+	for (int batchCount = 0; batchCount < offsets.size(); batchCount += 1) {
 		int tempSize = sizeof(float) * 4 * 3 * outTrianglesCountList[batchCount];
-		glBufferSubData(GL_ARRAY_BUFFER, allocatedSize, tempSize, normalList[batchCount]);
-		allocatedSize += tempSize;
+		glBufferSubData(GL_ARRAY_BUFFER, bindedSize, tempSize, normalList[batchCount]);
+		bindedSize += tempSize;
 	}
 
 	// position attribute
@@ -126,7 +168,6 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(sizeof(float) * 4 * 3 * outTrianglesCount));
 	glEnableVertexAttribArray(1);
 
-	outTrianglesCount = outTrianglesCount;
 	hasInitializdMarchingCubes = true;
 }
 
@@ -261,8 +302,10 @@ int main()
 	glBindBufferRange(GL_UNIFORM_BUFFER, 0, uboMatrices, 0, 3 * sizeof(glm::mat4));
 
 	glm::mat4 modelMat = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f));
+	// to correct the coord problem from input image
 	float angle = glm::pi<float>() / 2;
 	modelMat = glm::rotate(modelMat, angle, glm::vec3(0.0, 0.0, 1.0));
+	modelMat = glm::scale(modelMat, glm::vec3(1.0f, -1.0f, 1.0f));
 
 	glBindBuffer(GL_UNIFORM_BUFFER, uboMatrices);
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4), glm::value_ptr(modelMat));

@@ -2,11 +2,13 @@
 
 // uniforms
 uniform ivec3 inImgShape; // x, y, z of original scanned Img
-uniform ivec3 outCubeShape; // x, y, z of output shape
-uniform float cubeRatio;     // the size of a cube / 1 unit length in img
+uniform float cubeRatio;     // size of a cube / size of an img pixel
+uniform float sizeCompressRatio;     // how much do I want the cube to be resized
 uniform float isoLevel; // the threshold
-uniform int batchThickness;
-uniform int batchCount;
+
+uniform int outputOffset;
+uniform float imgOffset;
+
 
 layout(std430, binding = 1) readonly buffer InImg {
 	float data[];
@@ -28,7 +30,7 @@ layout(std430, binding = 7) readonly buffer TriTable {
 	int data[];
 } triTable;
 
-layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+layout(local_size_x = 1, local_size_y = 4, local_size_z = 4) in;
 
 float gridValue[8];
 vec3 gridCoord[8];
@@ -52,7 +54,7 @@ bool isOutOfRange = false;
 
 // get value of Img in case query is out of range
 float getInputImgData(int x, int y, int z) {
-	if(x >= inImgShape.x || y >= inImgShape.y || z >= inImgShape.z) {
+	if(x >= inImgShape.x || y >= inImgShape.y || z >= inImgShape.z || x < 0 || y < 0 || z < 0) {
 		isOutOfRange = true;
 		return 0.0;
 	}
@@ -80,7 +82,7 @@ float interpolate3D(float v1, float v2, float v3, float v4, float v5, float v6, 
 }
 
 float getInterpImgData(vec3 query) {
-	float imgFloatX = query.x * cubeRatio;
+	float imgFloatX = query.x * cubeRatio + imgOffset;
 	float imgFloatY = query.y * cubeRatio;
 	float imgFloatZ = query.z * cubeRatio;
 
@@ -111,7 +113,8 @@ vec3 interpCubePositions(int index1, int index2) {
 }
 
 vec3 getNormal(vec3 position) {
-	float delta = 0.6;
+	float delta = 1.0;
+	delta /= cubeRatio;
 	float vx1 = getInterpImgData(vec3(position.x - delta, position.y, position.z));
 	float vx2 = getInterpImgData(vec3(position.x + delta, position.y, position.z));
 	float vy1 = getInterpImgData(vec3(position.x, position.y - delta, position.z));
@@ -158,7 +161,7 @@ void main() {
 	for(int i = 0; i < 12; i++) {
 		triVerticeCandidates[i] = interpCubePositions(edgeToGridDict[i][0], edgeToGridDict[i][1]);
 		triNormalCandidates[i] = getNormal(triVerticeCandidates[i]);
-		triVerticeCandidates[i].x += batchThickness* batchCount / cubeRatio;
+		triVerticeCandidates[i].x += float(outputOffset);
 	}
 
 	for (int i = 0; triTable.data[cubeindex*16 + i] != -1; i += 3)
@@ -169,9 +172,9 @@ void main() {
 		uint triVertice2 = triTable.data[cubeindex*16 + i+1];
 		uint triVertice3 = triTable.data[cubeindex*16 + i+2];
 
-		outPositions.data[index_offset * 3] = 10 * vec4(triVerticeCandidates[triVertice1], 1.0) / outCubeShape.x;
-		outPositions.data[index_offset * 3+1] = 10 * vec4(triVerticeCandidates[triVertice2], 1.0) / outCubeShape.x;
-		outPositions.data[index_offset * 3+2] = 10 * vec4(triVerticeCandidates[triVertice3], 1.0) / outCubeShape.x;
+		outPositions.data[index_offset * 3] = vec4(triVerticeCandidates[triVertice1], 1.0) * sizeCompressRatio;
+		outPositions.data[index_offset * 3+1] = vec4(triVerticeCandidates[triVertice2], 1.0) * sizeCompressRatio;
+		outPositions.data[index_offset * 3+2] = vec4(triVerticeCandidates[triVertice3], 1.0) * sizeCompressRatio;
 		
 		outNormals.data[index_offset * 3] = vec4(triNormalCandidates[triVertice1], 1.0);
 		outNormals.data[index_offset * 3+1] = vec4(triNormalCandidates[triVertice2], 1.0);

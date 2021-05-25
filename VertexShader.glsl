@@ -16,5 +16,5 @@ void main()
 {
 	gl_Position = projection * view * model * vec4(aPos, 1.0f);
 	vsOutPosition = model * vec4(aPos, 1.0f);
-	vsOutNormal = aNormal;
+	vsOutNormal = vec3(model * vec4(aNormal, 1.0));
 }
