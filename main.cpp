@@ -2,8 +2,9 @@
 // SSBOs
 GLuint inImgSSBO, outPositionsSSBO, outNormalsSSBO, outTrianglesCountSSBO, edgeTableSSBO, triTableSSBO;
 
+int imageX, imageY, imageZ;
 // SSBOs can only read 128MB, so an input image is sliced into batches (eg. 507 * 512 * 512 -> batchSize * batchMaxThickness * 512 * 512)
-const int batchMaxThickness = 50;
+int batchMaxThickness;
 
 // has to be there so as to clear SSBO buffers properly?
 float *outPositionsBuffers[100], *outNormalsBuffers[100];
@@ -28,7 +29,7 @@ struct OffsetParams {
 	int imgWidth;
 };
 
-std::vector<OffsetParams> calcOffsets(int batchMaxThickness, float cubeRatio, int imgWidth, int outputWidth) {
+std::vector<OffsetParams> calcOffsets(const int batchMaxThickness, const float cubeRatio, const int imgWidth, const int outputWidth) {
 	std::vector<OffsetParams> v;
 	int outputMaxThickness = (int)((float)batchMaxThickness / cubeRatio);
 	int tempOutputStart = 0;
@@ -171,11 +172,30 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	hasInitializdMarchingCubes = true;
 }
 
+char * getImage3DConfig(int &x, int &y, int &z) {
+	char data[1000];
+	std::ifstream rfile;
+
+	rfile.open("file_config.txt", std::ios::in | std::ios::out);
+
+	rfile >> data;
+
+	rfile >> x >> y >> z;
+
+	rfile.close();
+
+	return data;
+}
 
 
-
+// int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 int main()
 {
+	// config
+	char *path;
+	path = getImage3DConfig(imageX, imageY, imageZ);
+	batchMaxThickness = 13000000 / (imageY * imageZ);
+
 	// glfw: initialize and configure
 	// ------------------------------
 	glfwInit();
@@ -244,10 +264,12 @@ int main()
 
 	// read medical data
 	std::string rawFilePath = "H:/hhx/hhx_works/scientific_visualization_2021/visualization-data/raw_data/cbct_sample_z=507_y=512_x=512.raw";
-	glm::ivec3 imgShape(507, 512, 512);
+	glm::ivec3 imgShape(imageX, imageY, imageZ);
 	FILE *fpsrc = NULL;
-	unsigned short *imgValsUINT = new unsigned short[507 * 512 * 512];
-	float *imgValsFLOAT = new float[507 * 512 * 512];
+	unsigned short *imgValsUINT;
+	imgValsUINT = (unsigned short *)malloc(sizeof(unsigned short) * imageX * imageY * imageZ);
+	float *imgValsFLOAT;
+	imgValsFLOAT = (float *)malloc(sizeof(float) * imageX * imageY * imageZ);
 	errno_t err = fopen_s(&fpsrc, rawFilePath.c_str(), "r");
 	if (err != 0)
 	{
@@ -258,22 +280,22 @@ int main()
 	{
 		printf("IMAGE read OK\n");
 	}
-	fread(imgValsUINT, sizeof(unsigned short), 507 * 512 * 512, fpsrc);
+	fread(imgValsUINT, sizeof(unsigned short), imageX * imageY * imageZ, fpsrc);
 	fclose(fpsrc);
 
 	unsigned short maxImgValue = 0;
 
-	for (int i = 0; i < 507 * 512 * 512; i++) {
+	for (int i = 0; i < imageX * imageY * imageZ; i++) {
 		if (imgValsUINT[i] > maxImgValue) {
 			maxImgValue = imgValsUINT[i];
 		}
 	}
 
-	for (int i = 0; i < 507 * 512 * 512; i++) {
+	for (int i = 0; i < imageX * imageY * imageZ; i++) {
 		imgValsFLOAT[i] = (float)imgValsUINT[i] / (float)maxImgValue;
 	}
 
-	delete[] imgValsUINT;
+	free(imgValsUINT);
 
 
 	int outputShape = 220;
