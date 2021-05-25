@@ -7,7 +7,7 @@ in vec4 vsOutPosition;
 uniform vec3 camPos;
 
 vec3 lightDir2 = vec3(1.0, 1.0, 0.0);
-vec3 lightCol1 = vec3(2.0, 1.9, 1.7);
+vec3 lightCol1 = vec3(1.0, 0.9, 0.8);
 vec3 lightCol2 = vec3(0.5, 0.6, 0.7);
 
 float shininess = 16;
@@ -22,7 +22,7 @@ float LinearizeDepth(float depth)
 }
 
 float getAttenuation(float distance) {
-return 1.0 / ((0.09 + 0.032 * distance) * distance + 1.0);
+return 1.0 / ((0.022 + 0.0019 * distance) * distance + 1.0);
 }
 
 vec3 calcLight(vec3 normal, vec3 camDir, vec3 lightDir, vec3 lightCol) {
