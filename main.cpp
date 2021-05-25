@@ -61,9 +61,35 @@ std::vector<OffsetParams> calcOffsets(const int batchMaxThickness, const float c
 	return v;
 }
 
+class Timer
+{
+private:
+	// Type aliases to make accessing nested type easier
+	using clock_t = std::chrono::high_resolution_clock;
+	using second_t = std::chrono::duration<double, std::ratio<1> >;
 
+	std::chrono::time_point<clock_t> m_beg;
+
+public:
+	Timer() : m_beg(clock_t::now())
+	{
+	}
+
+	void reset()
+	{
+		m_beg = clock_t::now();
+	}
+
+	double elapsed() const
+	{
+		return std::chrono::duration_cast<second_t>(clock_t::now() - m_beg).count();
+	}
+
+};
 
 void createMarchingCubes(const int outputShape, const float isoLevel, const glm::ivec3 inShape, float *const image3D, unsigned int &VAO, unsigned int &VBO) {
+	Timer timer;
+	double a;
 
 	int inMaxDim = std::max({ inShape.x, inShape.y, inShape.z }); // in 3 dimensions of input image3D, which dimension has the largest index?
 	float cubeRatio = inMaxDim * 1.0f / outputShape;
@@ -100,6 +126,11 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 
 	float *positions, *normals;
 
+
+	a = timer.elapsed();
+	timer.reset();
+	printf("%f\n", a);
+
 	for (int batchCount = 0; batchCount < offsets.size(); batchCount += 1) {
 		// outPositions
 		createSSBO(outPositionsSSBO, inShape.y*inShape.z*batchMaxThickness * 4, sizeof(glm::vec4), 2, outPositionsBuffers[batchCount], computeShader, "OutPositions");
@@ -112,20 +143,41 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 		createSSBO(inImgSSBO, inShape.y*inShape.z*offsets[batchCount].imgWidth, sizeof(float), 1, image3D + (inShape.y * inShape.z) * offsets[batchCount].imgStart, computeShader, "InImg");
 
 
+		a = timer.elapsed();
+		timer.reset();
+		printf("t1:%d  %f\n", batchCount, a);
+
 		computeShader->setInt("outputOffset", offsets[batchCount].outputOffset);
 		computeShader->setFloat("imgOffset", offsets[batchCount].imgOffset);
 
+
+		a = timer.elapsed();
+		timer.reset();
+		printf("t2:%d  %f\n", batchCount, a);
 		// TODO how large?
 		glDispatchCompute(offsets[batchCount].outputWidth, outputShape / 4, outputShape / 4);
 		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+		a = timer.elapsed();
+		timer.reset();
+		printf("t3:%d  %f\n", batchCount, a);
 		// glUseProgram(0);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outTrianglesCountSSBO);
 		int tempOutTrianglesCount = ((glm::uint *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::uint), GL_MAP_READ_BIT))[0];
+		a = timer.elapsed();
+		timer.reset();
+		printf("t3a:%d  %f\n", batchCount, a);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outPositionsSSBO);
 		positions = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4) * tempOutTrianglesCount * 4, GL_MAP_READ_BIT);
+		a = timer.elapsed();
+		timer.reset();
+		printf("t3b:%d  %f\n", batchCount, a);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outNormalsSSBO);
 		normals = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4) * tempOutTrianglesCount * 4, GL_MAP_READ_BIT);
 
+		a = timer.elapsed();
+		timer.reset();
+		printf("t4:%d  %f\n", batchCount, a);
 		float *ps = (float *)malloc(sizeof(glm::vec4) * tempOutTrianglesCount * 4);
 		float *ns = (float *)malloc(sizeof(glm::vec4) * tempOutTrianglesCount * 4);
 		memcpy(ps, positions, sizeof(glm::vec4) * tempOutTrianglesCount * 4);
@@ -135,6 +187,9 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 		positionList.push_back(ps);
 		normalList.push_back(ns);
 		outTrianglesCount += tempOutTrianglesCount;
+		a = timer.elapsed();
+		timer.reset();
+		printf("t5:%d  %f\n", batchCount, a);
 	}
 
 	// total size of the buffer in bytes
@@ -167,7 +222,10 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	glEnableVertexAttribArray(0);
 	// normal attribute
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(sizeof(float) * 4 * 3 * outTrianglesCount));
-	glEnableVertexAttribArray(1);
+	glEnableVertexAttribArray(1); 
+	timer.elapsed();
+	timer.reset();
+	printf("%f\n", a);
 
 	hasInitializdMarchingCubes = true;
 }

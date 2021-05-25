@@ -27,6 +27,7 @@
 #include <vector>
 #include <string>
 #include<algorithm>
+#include <chrono>
 
 // settings
 const unsigned int SCR_WIDTH = 800;
