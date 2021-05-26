@@ -9,7 +9,6 @@
 #include <GLFW/glfw3.h>
 #include "dcm_reader.h"
 #include "shader_s.h"
-#include <texture_loader.h>
 #include <hhx_camera_1.0.h>
 
 #include "imgui_impl_glfw.h"
@@ -83,13 +82,13 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 	camera->ResizeCallback(width, height);
 }
 
-void createSSBO(GLuint &newSSBO, const int arraySize, const int elemSize, const int bindingIndex, void *buffer, Shader *shader, const char *storageBlockName)
+void createSSBO(GLuint &newSSBO, const int memSize, const int bindingIndex, void *buffer, Shader *shader, const char *storageBlockName)
 {
 	glDeleteBuffers(1, &newSSBO);
 	glGenBuffers(1, &newSSBO);
 	int a = glGetError();
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, newSSBO);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, arraySize * elemSize, buffer, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, memSize, buffer, GL_DYNAMIC_DRAW);
 	// glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, newSSBO);
 	// glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 

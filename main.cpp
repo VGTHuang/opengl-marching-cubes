@@ -7,16 +7,12 @@ int imageX, imageY, imageZ;
 int batchMaxThickness;
 
 // has to be there so as to clear SSBO buffers properly?
-float *outPositionsBuffers[100], *outNormalsBuffers[100];
 int outTrianglesBuffer;
 
 // count the total number of triangles from all batches
 glm::uint outTrianglesCount = 0;
-
-// stores these info...
-std::vector<int> outTrianglesCountList = std::vector<int>();
-std::vector<float *> positionList = std::vector<float *>();
-std::vector<float *> normalList = std::vector<float *>();
+float *outPositions;
+float *outNormals;
 
 // if true, we have properly set edgetable and tritable for compute shader; no need to pass them to it again
 bool hasInitializdMarchingCubes = false;
@@ -87,6 +83,7 @@ public:
 };
 
 Timer timer;
+
 void printTimer(const char *info) {
 	double a = timer.elapsed();
 	timer.reset();
@@ -100,21 +97,17 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	std::vector<OffsetParams> offsets = calcOffsets(batchMaxThickness, cubeRatio, inShape.x, outputShape);
 
 	outTrianglesCount = 0;
-	for (float *tempPosition : positionList) {
-		free(tempPosition);
-	}
-	for (float *tempNormal : normalList) {
-		free(tempNormal);
-	}
-	positionList.clear();
-	normalList.clear();
-	outTrianglesCountList.clear();
 
-	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+	// TODO how large?
+	int preservedPosMemorySize = sizeof(glm::vec4) * outputShape * outputShape * outputShape * 2;
+	int preservedNormalMemorySize = sizeof(glm::vec4) * outputShape * outputShape * outputShape * 2;
+
 	computeShader->use();
 
 	// release buffer if marching cubes have already been created once
 	glDeleteVertexArrays(1, &VAO);
+	glDeleteBuffers(1, &VBO);
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
 
 	computeShader->setFloat("cubeRatio", cubeRatio);
@@ -123,24 +116,23 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 
 	if (hasInitializdMarchingCubes == false) {
 		// edgeTable
-		createSSBO(edgeTableSSBO, 256, sizeof(int), 6, &edgeTable[0], computeShader, "EdgeTable");
+		createSSBO(edgeTableSSBO, 256 * sizeof(int), 6, &edgeTable[0], computeShader, "EdgeTable");
 		// triTable
-		createSSBO(triTableSSBO, 256 * 16, sizeof(int), 7, &triTable[0], computeShader, "triTable");
+		createSSBO(triTableSSBO, 256 * 16 * sizeof(int), 7, &triTable[0], computeShader, "triTable");
 	}
+	// outPositions
+	createSSBO(outPositionsSSBO, preservedPosMemorySize, 2, outPositions, computeShader, "OutPositions");
+	// outNormals
+	createSSBO(outNormalsSSBO, preservedNormalMemorySize, 3, outNormals, computeShader, "OutNormals");
+	// outTrianglesCount
+	createSSBO(outTrianglesCountSSBO, sizeof(int), 4, &outTrianglesBuffer, computeShader, "OutTrianglesCount");
 
-	float *positions, *normals;
 
 	for (int batchCount = 0; batchCount < offsets.size(); batchCount += 1) {
 		timer.reset();
-		// outPositions
-		createSSBO(outPositionsSSBO, inShape.y*inShape.z*batchMaxThickness * 4, sizeof(glm::vec4), 2, outPositionsBuffers[batchCount], computeShader, "OutPositions");
-		// outNormals
-		createSSBO(outNormalsSSBO, inShape.y*inShape.z*batchMaxThickness * 4, sizeof(glm::vec4), 3, outNormalsBuffers[batchCount], computeShader, "OutNormals");
-		// outTrianglesCount
-		createSSBO(outTrianglesCountSSBO, 1, sizeof(float), 4, &outTrianglesBuffer, computeShader, "OutTrianglesCount");
 		// inImg
 		computeShader->setIVec3("inImgShape", offsets[batchCount].imgWidth, inShape.y, inShape.z);
-		createSSBO(inImgSSBO, inShape.y*inShape.z*offsets[batchCount].imgWidth, sizeof(float), 1, image3D + (inShape.y * inShape.z) * offsets[batchCount].imgStart, computeShader, "InImg");
+		createSSBO(inImgSSBO, inShape.y*inShape.z*offsets[batchCount].imgWidth * sizeof(float), 1, image3D + (inShape.y * inShape.z) * offsets[batchCount].imgStart, computeShader, "InImg");
 
 		computeShader->setInt("outputOffset", offsets[batchCount].outputOffset);
 		computeShader->setFloat("imgOffset", offsets[batchCount].imgOffset);
@@ -149,111 +141,49 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 		// TODO how large?
 		glDispatchCompute(offsets[batchCount].outputWidth, outputShape / 4, outputShape / 4);
 		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-		printTimer("compute:  ");
 
-
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, outTrianglesCountSSBO);
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outTrianglesCountSSBO);
-		int tempOutTrianglesCount = ((glm::uint *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::uint), GL_MAP_READ_BIT))[0];
-		printTimer("get trianglesCount:    ");
-
-
-
-
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outPositionsSSBO);
-		positions = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4) * tempOutTrianglesCount * 4, GL_MAP_READ_BIT);
-		printTimer("get outPositions:    ");
-
-
-
-
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outNormalsSSBO);
-		normals = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4) * tempOutTrianglesCount * 4, GL_MAP_READ_BIT);
-		printTimer("get outNormals:    ");
-
-
-
-
-		float *ps = (float *)malloc(sizeof(glm::vec4) * tempOutTrianglesCount * 4);
-		float *ns = (float *)malloc(sizeof(glm::vec4) * tempOutTrianglesCount * 4);
-		memcpy(ps, positions, sizeof(glm::vec4) * tempOutTrianglesCount * 4);
-		memcpy(ns, normals, sizeof(glm::vec4) * tempOutTrianglesCount * 4);
-		
-		outTrianglesCountList.push_back(tempOutTrianglesCount);
-		positionList.push_back(ps);
-		normalList.push_back(ns);
-		outTrianglesCount += tempOutTrianglesCount;
-
-		printTimer("copy memory");
 	}
 
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, outTrianglesCountSSBO);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, outTrianglesCountSSBO);
+	outTrianglesCount = ((glm::uint *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::uint), GL_MAP_READ_BIT))[0];
+
+	int totalPositionSize = sizeof(glm::vec4) * 3 * outTrianglesCount;
+	int totalNormalSize = sizeof(glm::vec4) * 3 * outTrianglesCount;
+
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, outPositionsSSBO);
+	float *positions = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, totalPositionSize, GL_MAP_READ_BIT);
+
+
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, outNormalsSSBO);
+	float *normals = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, totalNormalSize, GL_MAP_READ_BIT);
+
+	float *ps = (float*)malloc(totalPositionSize);
+	memcpy(ps, positions, totalPositionSize);
+	float *ns = (float*)malloc(totalNormalSize);
+	memcpy(ns, normals, totalNormalSize);
+
 	// total size of the buffer in bytes
-	int totalPositionSize = sizeof(float) * 4 * 3 * outTrianglesCount;
-	int totalNormalSize = sizeof(float) * 4 * 3 * outTrianglesCount;
 	glGenVertexArrays(1, &VAO);
 	glGenBuffers(1, &VBO);
 	glBindVertexArray(VAO);
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
 	glBufferData(GL_ARRAY_BUFFER, totalPositionSize + totalNormalSize, nullptr, GL_STATIC_DRAW);
 
-	int bindedSize = 0;
-	// data in vbo follows the structure of
-	// [positions from 1st batch] [positions from 2nd batch] ... [normals from 1st batch] [normals from 2nd batch] ...
-	// buffer all positions
-	for (int batchCount = 0; batchCount < offsets.size(); batchCount += 1) {
-		int tempSize = sizeof(float) * 4 * 3 * outTrianglesCountList[batchCount];
-		glBufferSubData(GL_ARRAY_BUFFER, bindedSize, tempSize, positionList[batchCount]);
-		bindedSize += tempSize;
-	}
-	// buffer all normals
-	for (int batchCount = 0; batchCount < offsets.size(); batchCount += 1) {
-		int tempSize = sizeof(float) * 4 * 3 * outTrianglesCountList[batchCount];
-		glBufferSubData(GL_ARRAY_BUFFER, bindedSize, tempSize, normalList[batchCount]);
-		bindedSize += tempSize;
-	}
+	glBufferSubData(GL_ARRAY_BUFFER, 0, totalPositionSize, &ps[0]);
+	glBufferSubData(GL_ARRAY_BUFFER, totalPositionSize, totalNormalSize, &ns[0]);
+
 
 	// position attribute
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
 	glEnableVertexAttribArray(0);
 	// normal attribute
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(sizeof(float) * 4 * 3 * outTrianglesCount));
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(totalPositionSize));
 	glEnableVertexAttribArray(1);
 
-	printTimer("bbb");
-
 	hasInitializdMarchingCubes = true;
 }
 
-
-void createMarchingCubes1(const int outputShape, const float isoLevel, const glm::ivec3 inShape, float *const image3D, unsigned int &VAO, unsigned int &VBO) {
-	outTrianglesCount = 0;
-	outTrianglesCountList.clear();
-
-	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-	computeShader->use();
-	// outPositions
-	// outTrianglesCount
-	createSSBO(outTrianglesCountSSBO, 1, sizeof(float), 4, &outTrianglesBuffer, computeShader, "OutTrianglesCount");
-
-
-	for (int batchCount = 0; batchCount < 3; batchCount += 1) {
-		timer.reset();
-
-		// TODO how large?
-		glDispatchCompute(2, 2, 2);
-		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-		printTimer("compute:  ");
-
-	}
-	timer.reset();
-
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, outTrianglesCountSSBO);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, outTrianglesCountSSBO);
-	int tempOutTrianglesCount = ((glm::uint *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::uint), GL_MAP_READ_BIT))[0];
-	printTimer("get trianglesCount:    ");
-
-	hasInitializdMarchingCubes = true;
-}
 
 
 char * getImage3DConfig(int &x, int &y, int &z) {
@@ -278,7 +208,7 @@ int main()
 	// config
 	char *path;
 	path = getImage3DConfig(imageX, imageY, imageZ);
-	batchMaxThickness = 13000000 / (imageY * imageZ);
+	batchMaxThickness = 20000000 / (imageY * imageZ);
 
 	// glfw: initialize and configure
 	// ------------------------------
@@ -344,7 +274,7 @@ int main()
 	drawWireframeShader = new Shader("WireVertexShader.glsl", "WireFragmentShader.glsl");
 
 	// compute shader
-	computeShader = new Shader("ComputeShader1.glsl");
+	computeShader = new Shader("ComputeShader.glsl");
 
 	// read medical data
 	std::string rawFilePath = "H:/hhx/hhx_works/scientific_visualization_2021/visualization-data/raw_data/cbct_sample_z=507_y=512_x=512.raw";
@@ -382,7 +312,7 @@ int main()
 	free(imgValsUINT);
 
 
-	int outputShape = 220;
+	int outputShape = 30;
 	int oldOutputShape = outputShape;
 
 	float isoLevel = 0.31;

@@ -113,7 +113,7 @@ vec3 interpCubePositions(int index1, int index2) {
 }
 
 vec3 getNormal(vec3 position) {
-	float delta = 1.0;
+	float delta = 2.1;
 	delta /= cubeRatio;
 	float vx1 = getInterpImgData(vec3(position.x - delta, position.y, position.z));
 	float vx2 = getInterpImgData(vec3(position.x + delta, position.y, position.z));
