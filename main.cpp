@@ -84,12 +84,16 @@ public:
 	{
 		return std::chrono::duration_cast<second_t>(clock_t::now() - m_beg).count();
 	}
-
 };
 
+Timer timer;
+void printTimer(const char *info) {
+	double a = timer.elapsed();
+	timer.reset();
+	printf("%s %f\n", info, a);
+}
+
 void createMarchingCubes(const int outputShape, const float isoLevel, const glm::ivec3 inShape, float *const image3D, unsigned int &VAO, unsigned int &VBO) {
-	Timer timer;
-	double a;
 
 	int inMaxDim = std::max({ inShape.x, inShape.y, inShape.z }); // in 3 dimensions of input image3D, which dimension has the largest index?
 	float cubeRatio = inMaxDim * 1.0f / outputShape;
@@ -126,12 +130,8 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 
 	float *positions, *normals;
 
-
-	a = timer.elapsed();
-	timer.reset();
-	printf("%f\n", a);
-
 	for (int batchCount = 0; batchCount < offsets.size(); batchCount += 1) {
+		timer.reset();
 		// outPositions
 		createSSBO(outPositionsSSBO, inShape.y*inShape.z*batchMaxThickness * 4, sizeof(glm::vec4), 2, outPositionsBuffers[batchCount], computeShader, "OutPositions");
 		// outNormals
@@ -142,42 +142,38 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 		computeShader->setIVec3("inImgShape", offsets[batchCount].imgWidth, inShape.y, inShape.z);
 		createSSBO(inImgSSBO, inShape.y*inShape.z*offsets[batchCount].imgWidth, sizeof(float), 1, image3D + (inShape.y * inShape.z) * offsets[batchCount].imgStart, computeShader, "InImg");
 
-
-		a = timer.elapsed();
-		timer.reset();
-		printf("t1:%d  %f\n", batchCount, a);
-
 		computeShader->setInt("outputOffset", offsets[batchCount].outputOffset);
 		computeShader->setFloat("imgOffset", offsets[batchCount].imgOffset);
 
 
-		a = timer.elapsed();
-		timer.reset();
-		printf("t2:%d  %f\n", batchCount, a);
 		// TODO how large?
 		glDispatchCompute(offsets[batchCount].outputWidth, outputShape / 4, outputShape / 4);
 		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+		printTimer("compute:  ");
 
-		a = timer.elapsed();
-		timer.reset();
-		printf("t3:%d  %f\n", batchCount, a);
-		// glUseProgram(0);
+
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, outTrianglesCountSSBO);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outTrianglesCountSSBO);
 		int tempOutTrianglesCount = ((glm::uint *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::uint), GL_MAP_READ_BIT))[0];
-		a = timer.elapsed();
-		timer.reset();
-		printf("t3a:%d  %f\n", batchCount, a);
+		printTimer("get trianglesCount:    ");
+
+
+
+
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outPositionsSSBO);
 		positions = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4) * tempOutTrianglesCount * 4, GL_MAP_READ_BIT);
-		a = timer.elapsed();
-		timer.reset();
-		printf("t3b:%d  %f\n", batchCount, a);
+		printTimer("get outPositions:    ");
+
+
+
+
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, outNormalsSSBO);
 		normals = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4) * tempOutTrianglesCount * 4, GL_MAP_READ_BIT);
+		printTimer("get outNormals:    ");
 
-		a = timer.elapsed();
-		timer.reset();
-		printf("t4:%d  %f\n", batchCount, a);
+
+
+
 		float *ps = (float *)malloc(sizeof(glm::vec4) * tempOutTrianglesCount * 4);
 		float *ns = (float *)malloc(sizeof(glm::vec4) * tempOutTrianglesCount * 4);
 		memcpy(ps, positions, sizeof(glm::vec4) * tempOutTrianglesCount * 4);
@@ -187,9 +183,8 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 		positionList.push_back(ps);
 		normalList.push_back(ns);
 		outTrianglesCount += tempOutTrianglesCount;
-		a = timer.elapsed();
-		timer.reset();
-		printf("t5:%d  %f\n", batchCount, a);
+
+		printTimer("copy memory");
 	}
 
 	// total size of the buffer in bytes
@@ -222,13 +217,44 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	glEnableVertexAttribArray(0);
 	// normal attribute
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(sizeof(float) * 4 * 3 * outTrianglesCount));
-	glEnableVertexAttribArray(1); 
-	timer.elapsed();
-	timer.reset();
-	printf("%f\n", a);
+	glEnableVertexAttribArray(1);
+
+	printTimer("bbb");
 
 	hasInitializdMarchingCubes = true;
 }
+
+
+void createMarchingCubes1(const int outputShape, const float isoLevel, const glm::ivec3 inShape, float *const image3D, unsigned int &VAO, unsigned int &VBO) {
+	outTrianglesCount = 0;
+	outTrianglesCountList.clear();
+
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+	computeShader->use();
+	// outPositions
+	// outTrianglesCount
+	createSSBO(outTrianglesCountSSBO, 1, sizeof(float), 4, &outTrianglesBuffer, computeShader, "OutTrianglesCount");
+
+
+	for (int batchCount = 0; batchCount < 3; batchCount += 1) {
+		timer.reset();
+
+		// TODO how large?
+		glDispatchCompute(2, 2, 2);
+		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+		printTimer("compute:  ");
+
+	}
+	timer.reset();
+
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, outTrianglesCountSSBO);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, outTrianglesCountSSBO);
+	int tempOutTrianglesCount = ((glm::uint *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::uint), GL_MAP_READ_BIT))[0];
+	printTimer("get trianglesCount:    ");
+
+	hasInitializdMarchingCubes = true;
+}
+
 
 char * getImage3DConfig(int &x, int &y, int &z) {
 	char data[1000];
@@ -318,7 +344,7 @@ int main()
 	drawWireframeShader = new Shader("WireVertexShader.glsl", "WireFragmentShader.glsl");
 
 	// compute shader
-	computeShader = new Shader("ComputeShader.glsl");
+	computeShader = new Shader("ComputeShader1.glsl");
 
 	// read medical data
 	std::string rawFilePath = "H:/hhx/hhx_works/scientific_visualization_2021/visualization-data/raw_data/cbct_sample_z=507_y=512_x=512.raw";
