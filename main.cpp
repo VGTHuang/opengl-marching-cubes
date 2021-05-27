@@ -157,11 +157,7 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, outNormalsSSBO);
 	float *normals = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, totalNormalSize, GL_MAP_READ_BIT);
-
-	float *ps = (float*)malloc(totalPositionSize);
-	memcpy(ps, positions, totalPositionSize);
-	float *ns = (float*)malloc(totalNormalSize);
-	memcpy(ns, normals, totalNormalSize);
+	
 
 	// total size of the buffer in bytes
 	glGenVertexArrays(1, &VAO);
@@ -170,8 +166,8 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
 	glBufferData(GL_ARRAY_BUFFER, totalPositionSize + totalNormalSize, nullptr, GL_STATIC_DRAW);
 
-	glBufferSubData(GL_ARRAY_BUFFER, 0, totalPositionSize, &ps[0]);
-	glBufferSubData(GL_ARRAY_BUFFER, totalPositionSize, totalNormalSize, &ns[0]);
+	glBufferSubData(GL_ARRAY_BUFFER, 0, totalPositionSize, positions);
+	glBufferSubData(GL_ARRAY_BUFFER, totalPositionSize, totalNormalSize, normals);
 
 
 	// position attribute
@@ -202,8 +198,8 @@ char * getImage3DConfig(int &x, int &y, int &z) {
 }
 
 
-// int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
-int main()
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+// int main()
 {
 	// config
 	char *path;
