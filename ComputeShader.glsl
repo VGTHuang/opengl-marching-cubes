@@ -5,14 +5,10 @@ uniform ivec3 inImgShape; // x, y, z of original scanned Img
 uniform float cubeRatio;     // size of a cube / size of an img pixel
 uniform float sizeCompressRatio;     // how much do I want the cube to be resized
 uniform float isoLevel; // the threshold
+uniform int maxImgValue;
 
-uniform int outputOffset;
-uniform float imgOffset;
+layout(r16, binding = 1) uniform readonly image3D inImg;
 
-
-layout(std430, binding = 1) readonly buffer InImg {
-	float data[];
-} inImg;
 layout(std430, binding = 2) writeonly buffer OutPositions {
 	vec4 data[];
 } outPositions;
@@ -30,7 +26,7 @@ layout(std430, binding = 7) readonly buffer TriTable {
 	int data[];
 } triTable;
 
-layout(local_size_x = 1, local_size_y = 4, local_size_z = 4) in;
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
 float gridValue[8];
 vec3 gridCoord[8];
@@ -59,7 +55,7 @@ float getInputImgData(int x, int y, int z) {
 		return 0.0;
 	}
 	else {
-		return inImg.data[x * (inImgShape.y * inImgShape.z) + y * inImgShape.z + z];
+		return imageLoad(inImg, ivec3(x, y, z)).r * 65536.0 / float(maxImgValue);
 	}
 }
 
@@ -82,13 +78,12 @@ float interpolate3D(float v1, float v2, float v3, float v4, float v5, float v6, 
 }
 
 float getInterpImgData(vec3 query) {
-	float imgFloatX = query.x * cubeRatio + imgOffset;
-	float imgFloatY = query.y * cubeRatio;
-	float imgFloatZ = query.z * cubeRatio;
+	query = query * cubeRatio;
+	ivec3 queryInt = ivec3(query);
 
-	int imgIntX = int(floor(imgFloatX));
-	int imgIntY = int(floor(imgFloatY));
-	int imgIntZ = int(floor(imgFloatZ));
+	int imgIntX = queryInt.x;
+	int imgIntY = queryInt.y;
+	int imgIntZ = queryInt.z;
 
 	float v1 = getInputImgData(imgIntX,   imgIntY,   imgIntZ  );
 	float v2 = getInputImgData(imgIntX+1, imgIntY,   imgIntZ  );
@@ -99,9 +94,9 @@ float getInterpImgData(vec3 query) {
 	float v7 = getInputImgData(imgIntX,   imgIntY+1, imgIntZ+1);
 	float v8 = getInputImgData(imgIntX+1, imgIntY+1, imgIntZ+1);
 	
-	float x = imgFloatX - float(imgIntX);
-	float y = imgFloatY - float(imgIntY);
-	float z = imgFloatZ - float(imgIntZ);
+	float x = query.x - float(imgIntX);
+	float y = query.y - float(imgIntY);
+	float z = query.z - float(imgIntZ);
 
 	return interpolate3D(v1, v2, v3, v4, v5, v6, v7, v8, x, y, z);
 }
@@ -122,6 +117,20 @@ vec3 getNormal(vec3 position) {
 	float vz1 = getInterpImgData(vec3(position.x, position.y, position.z - delta));
 	float vz2 = getInterpImgData(vec3(position.x, position.y, position.z + delta));
 	return normalize(vec3(vx1 - vx2, vy1 - vy2, vz1-vz2));
+}
+
+void main1() {
+	vec4 aaa = vec4(gl_GlobalInvocationID.x,   gl_GlobalInvocationID.y,   gl_GlobalInvocationID.z, 0);
+	float val = getInputImgData(int(gl_GlobalInvocationID.x*2+200),   int(gl_GlobalInvocationID.y*2+200),   int(gl_GlobalInvocationID.z*2+200));
+	uint index_offset = atomicAdd(outTrianglesCount.data[0], 1);
+
+	outPositions.data[index_offset * 3] = (aaa+vec4(0,0,0,1.0)) * sizeCompressRatio;
+	outPositions.data[index_offset * 3+1] = (aaa+vec4(0,val,0,1.0)) *  sizeCompressRatio;
+	outPositions.data[index_offset * 3+2] = (aaa+vec4(0,0,val,1.0)) *  sizeCompressRatio;
+		
+	outNormals.data[index_offset * 3] = vec4(1.0);
+	outNormals.data[index_offset * 3+1] = vec4(1.0);
+	outNormals.data[index_offset * 3+2] = vec4(1.0);
 }
 
 void main() {
@@ -161,7 +170,6 @@ void main() {
 	for(int i = 0; i < 12; i++) {
 		triVerticeCandidates[i] = interpCubePositions(edgeToGridDict[i][0], edgeToGridDict[i][1]);
 		triNormalCandidates[i] = getNormal(triVerticeCandidates[i]);
-		triVerticeCandidates[i].x += float(outputOffset);
 	}
 
 	for (int i = 0; triTable.data[cubeindex*16 + i] != -1; i += 3)

@@ -1,10 +1,9 @@
 #include <main.h>
 // SSBOs
 GLuint inImgSSBO, outPositionsSSBO, outNormalsSSBO, outTrianglesCountSSBO, edgeTableSSBO, triTableSSBO;
+GLuint image3DTexObj;
 
 int imageX, imageY, imageZ;
-// SSBOs can only read 128MB, so an input image is sliced into batches (eg. 507 * 512 * 512 -> batchSize * batchMaxThickness * 512 * 512)
-int batchMaxThickness;
 
 // has to be there so as to clear SSBO buffers properly?
 int outTrianglesBuffer;
@@ -17,84 +16,23 @@ float *outNormals;
 // if true, we have properly set edgetable and tritable for compute shader; no need to pass them to it again
 bool hasInitializdMarchingCubes = false;
 
-struct OffsetParams {
-	int outputWidth;
-	int outputOffset;
-	float imgOffset;
-	int imgStart;
-	int imgWidth;
-};
-
-std::vector<OffsetParams> calcOffsets(const int batchMaxThickness, const float cubeRatio, const int imgWidth, const int outputWidth) {
-	std::vector<OffsetParams> v;
-	int outputMaxThickness = (int)((float)batchMaxThickness / cubeRatio);
-	int tempOutputStart = 0;
-	while (tempOutputStart < outputWidth - 1) {
-		int tempOutputEnd = tempOutputStart + outputMaxThickness;
-		float tempImgStartF = (tempOutputStart - 1) * cubeRatio;
-		int tempImgStartI = int(tempImgStartF);
-		float tempImgEndF = (tempOutputEnd + 1) * cubeRatio;
-		int tempImgEndI = int(tempImgEndF) + 2;
-		if (tempImgStartI < 0) {
-			tempImgStartI = 0;
-		}
-		if (tempImgEndI > imgWidth - 1) {
-			tempImgEndI = imgWidth - 1;
-		}
-		OffsetParams p;
-		p.imgStart = tempImgStartI;
-		p.imgWidth = tempImgEndI - tempImgStartI;
-		p.outputOffset = tempOutputStart;
-		// TODO -? +?
-		p.imgOffset = tempOutputStart * cubeRatio - (float)tempImgStartI;
-		p.outputWidth = outputMaxThickness;
-		if (tempImgEndI - tempImgStartI > 1) {
-			v.push_back(p);
-		}
-
-		tempOutputStart = tempOutputEnd;
-	}
-	return v;
+void genTexImage3D(unsigned short *imgVals, glm::ivec3 img3DShape) {
+	glGenTextures(1, &image3DTexObj);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_3D, image3DTexObj);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexImage3D(GL_TEXTURE_3D, 0, GL_R16, img3DShape.y, img3DShape.z, img3DShape.x, 0, GL_RED, GL_UNSIGNED_SHORT,
+		imgVals);
 }
 
-class Timer
-{
-private:
-	// Type aliases to make accessing nested type easier
-	using clock_t = std::chrono::high_resolution_clock;
-	using second_t = std::chrono::duration<double, std::ratio<1> >;
-
-	std::chrono::time_point<clock_t> m_beg;
-
-public:
-	Timer() : m_beg(clock_t::now())
-	{
-	}
-
-	void reset()
-	{
-		m_beg = clock_t::now();
-	}
-
-	double elapsed() const
-	{
-		return std::chrono::duration_cast<second_t>(clock_t::now() - m_beg).count();
-	}
-};
-
-Timer timer;
-
-void printTimer(const char *info) {
-	double a = timer.elapsed();
-	timer.reset();
-	printf("%s %f\n", info, a);
-}
-
-void createMarchingCubes(const int outputShape, const float isoLevel, const glm::ivec3 inShape, float *const image3D, unsigned int &VAO, unsigned int &VBO) {
+void createMarchingCubes(const int outputShape, const float isoLevel, const glm::ivec3 inShape, unsigned int &VAO, unsigned int &VBO) {
 
 	int inMaxDim = std::max({ inShape.x, inShape.y, inShape.z }); // in 3 dimensions of input image3D, which dimension has the largest index?
 	float cubeRatio = inMaxDim * 1.0f / outputShape;
-	std::vector<OffsetParams> offsets = calcOffsets(batchMaxThickness, cubeRatio, inShape.x, outputShape);
 
 	outTrianglesCount = 0;
 
@@ -126,10 +64,15 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	createSSBO(outNormalsSSBO, preservedNormalMemorySize, 3, outNormals, computeShader, "OutNormals");
 	// outTrianglesCount
 	createSSBO(outTrianglesCountSSBO, sizeof(int), 4, &outTrianglesBuffer, computeShader, "OutTrianglesCount");
+	computeShader->setIVec3("inImgShape", inShape.x, inShape.y, inShape.z);
 
+	glBindImageTexture(1, image3DTexObj, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R16);
 
+	glDispatchCompute(outputShape / 4, outputShape / 4, outputShape / 4);
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+	/*
 	for (int batchCount = 0; batchCount < offsets.size(); batchCount += 1) {
-		timer.reset();
 		// inImg
 		computeShader->setIVec3("inImgShape", offsets[batchCount].imgWidth, inShape.y, inShape.z);
 		createSSBO(inImgSSBO, inShape.y*inShape.z*offsets[batchCount].imgWidth * sizeof(float), 1, image3D + (inShape.y * inShape.z) * offsets[batchCount].imgStart, computeShader, "InImg");
@@ -143,6 +86,7 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
 	}
+	*/
 
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, outTrianglesCountSSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, outTrianglesCountSSBO);
@@ -151,14 +95,13 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 	int totalPositionSize = sizeof(glm::vec4) * 3 * outTrianglesCount;
 	int totalNormalSize = sizeof(glm::vec4) * 3 * outTrianglesCount;
 
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, outPositionsSSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, outPositionsSSBO);
 	float *positions = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, totalPositionSize, GL_MAP_READ_BIT);
-
-
+	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, outNormalsSSBO);
 	float *normals = (float *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, totalNormalSize, GL_MAP_READ_BIT);
 	
-
 	// total size of the buffer in bytes
 	glGenVertexArrays(1, &VAO);
 	glGenBuffers(1, &VBO);
@@ -182,7 +125,7 @@ void createMarchingCubes(const int outputShape, const float isoLevel, const glm:
 
 
 
-char * getImage3DConfig(int &x, int &y, int &z) {
+std::string getImage3DConfig(int &x, int &y, int &z) {
 	char data[1000];
 	std::ifstream rfile;
 
@@ -198,13 +141,11 @@ char * getImage3DConfig(int &x, int &y, int &z) {
 }
 
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
-// int main()
+// int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+int main()
 {
 	// config
-	char *path;
-	path = getImage3DConfig(imageX, imageY, imageZ);
-	batchMaxThickness = 20000000 / (imageY * imageZ);
+	std::string path = getImage3DConfig(imageX, imageY, imageZ);
 
 	// glfw: initialize and configure
 	// ------------------------------
@@ -243,6 +184,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	}
 	glfwMakeContextCurrent(window);
 
+
 	// camera
 	glm::vec3 camPos(-10.0f, -5.0f, -10.0f);
 	camera = new Camera(camPos, SCR_WIDTH, SCR_HEIGHT, 8.0f, 0.5f);
@@ -277,9 +219,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	FILE *fpsrc = NULL;
 	unsigned short *imgValsUINT;
 	imgValsUINT = (unsigned short *)malloc(sizeof(unsigned short) * imageX * imageY * imageZ);
-	float *imgValsFLOAT;
-	imgValsFLOAT = (float *)malloc(sizeof(float) * imageX * imageY * imageZ);
-	errno_t err = fopen_s(&fpsrc, path, "r");
+	errno_t err = fopen_s(&fpsrc, path.c_str(), "r");
 	if (err != 0)
 	{
 		printf("can not open the raw image");
@@ -299,10 +239,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			maxImgValue = imgValsUINT[i];
 		}
 	}
+	computeShader->use();
+	computeShader->setInt("maxImgValue", maxImgValue);
 
-	for (int i = 0; i < imageX * imageY * imageZ; i++) {
-		imgValsFLOAT[i] = (float)imgValsUINT[i] / (float)maxImgValue;
-	}
+
+	genTexImage3D(imgValsUINT, imgShape);
 
 	free(imgValsUINT);
 
@@ -315,7 +256,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	unsigned int VAO, VBO;
 
-	createMarchingCubes(outputShape, isoLevel, imgShape, imgValsFLOAT, VAO, VBO);
+	createMarchingCubes(outputShape, isoLevel, imgShape, VAO, VBO);
 	
 
 	// uniform buffer for draw & draw wireframe
@@ -334,8 +275,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	glm::mat4 modelMat = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f));
 	// to correct the coord problem from input image
-	float angle = glm::pi<float>() / 2;
-	modelMat = glm::rotate(modelMat, angle, glm::vec3(0.0, 0.0, 1.0));
+	float angle = -glm::pi<float>() / 2;
+	modelMat = glm::rotate(modelMat, angle, glm::vec3(1.0, 0.0, 0.0));
 	modelMat = glm::scale(modelMat, glm::vec3(1.0f, -1.0f, 1.0f));
 
 	glBindBuffer(GL_UNIFORM_BUFFER, uboMatrices);
@@ -385,7 +326,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		ImGui::Render();
 
 		if (isoLevel != oldIsoLevel || outputShape != oldOutputShape) {
-			createMarchingCubes(outputShape, isoLevel, imgShape, imgValsFLOAT, VAO, VBO);
+			createMarchingCubes(outputShape, isoLevel, imgShape, VAO, VBO);
 			oldIsoLevel = isoLevel;
 			oldOutputShape = outputShape;
 		}
