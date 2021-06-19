@@ -273,14 +273,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	computeShader = new Shader("ComputeShader.glsl");
 
 	// read medical data
-	std::string rawFilePath = "H:/hhx/hhx_works/scientific_visualization_2021/visualization-data/raw_data/cbct_sample_z=507_y=512_x=512.raw";
 	glm::ivec3 imgShape(imageX, imageY, imageZ);
 	FILE *fpsrc = NULL;
 	unsigned short *imgValsUINT;
 	imgValsUINT = (unsigned short *)malloc(sizeof(unsigned short) * imageX * imageY * imageZ);
 	float *imgValsFLOAT;
 	imgValsFLOAT = (float *)malloc(sizeof(float) * imageX * imageY * imageZ);
-	errno_t err = fopen_s(&fpsrc, rawFilePath.c_str(), "r");
+	errno_t err = fopen_s(&fpsrc, path, "r");
 	if (err != 0)
 	{
 		printf("can not open the raw image");
