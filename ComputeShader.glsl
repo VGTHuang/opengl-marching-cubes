@@ -119,20 +119,6 @@ vec3 getNormal(vec3 position) {
 	return normalize(vec3(vx1 - vx2, vy1 - vy2, vz1-vz2));
 }
 
-void main1() {
-	vec4 aaa = vec4(gl_GlobalInvocationID.x,   gl_GlobalInvocationID.y,   gl_GlobalInvocationID.z, 0);
-	float val = getInputImgData(int(gl_GlobalInvocationID.x*2+200),   int(gl_GlobalInvocationID.y*2+200),   int(gl_GlobalInvocationID.z*2+200));
-	uint index_offset = atomicAdd(outTrianglesCount.data[0], 1);
-
-	outPositions.data[index_offset * 3] = (aaa+vec4(0,0,0,1.0)) * sizeCompressRatio;
-	outPositions.data[index_offset * 3+1] = (aaa+vec4(0,val,0,1.0)) *  sizeCompressRatio;
-	outPositions.data[index_offset * 3+2] = (aaa+vec4(0,0,val,1.0)) *  sizeCompressRatio;
-		
-	outNormals.data[index_offset * 3] = vec4(1.0);
-	outNormals.data[index_offset * 3+1] = vec4(1.0);
-	outNormals.data[index_offset * 3+2] = vec4(1.0);
-}
-
 void main() {
 	gridCoord[0] = vec3(gl_GlobalInvocationID.x,   gl_GlobalInvocationID.y,   gl_GlobalInvocationID.z  );
 	gridCoord[1] = vec3(gl_GlobalInvocationID.x+1, gl_GlobalInvocationID.y,   gl_GlobalInvocationID.z  );
